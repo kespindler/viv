@@ -1,4 +1,7 @@
+import os
+import sys
 import re
+import shutil
 import viv.types as t
 from viv.parser import read_pipfile
 from os import path
@@ -13,6 +16,9 @@ def norm_package_name(s: str) -> str:
 
 def _resolve_pip_command() -> t.Opt[str]:
     """Find the pip command for the env. Prefer using resolve_pip_or_create_venv."""
+    env_virtualenv = os.environ.get('VIRTUAL_ENV')
+    if env_virtualenv:
+        return env_virtualenv + '/bin/pip'
     static_paths = [
         path.abspath('env/bin/pip'),
         path.abspath('venv/bin/pip'),
@@ -31,9 +37,13 @@ def resolve_pip_or_create_venv() -> str:
     cmd = _resolve_pip_command()
     if cmd:
         return cmd
-    code = sub.Popen(['virtualenv', 'env']).wait()
-    if code:
-        raise OSError('Failed to create virtualenv.')
+    try:
+        code = sub.Popen(['virtualenv', 'env']).wait()
+        if code:
+            raise OSError('Failed to create virtualenv.')
+    except KeyboardInterrupt:
+        shutil.rmtree('env')
+        sys.exit(1)
     return path.abspath('env/bin/pip')
 
 

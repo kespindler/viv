@@ -1,6 +1,7 @@
 from shlex import quote
 import sys
 import os
+from os import path
 import viv.types as t
 from pathlib import Path
 from viv.resolver import (
@@ -110,27 +111,39 @@ def sync(dev=False):
     sys.exit(sub.Popen(args).wait())
 
 
-def _proc_args_for_venv(args: t.Opt[t.Tuple[str]]):
+def _venv_proc_args(subproc_args: t.Opt[t.Tuple[str]]):
     """Generate shell args that run the given command
     in a shell which has the virtualenv activated.
 
     If no args are given, launch the shell itself.
     """
-    pipcmd = resolve_pip_or_create_venv()
-    activate_cmd = str(Path(pipcmd).with_name('activate'))
-    shell_cmd = '/bin/bash'
-    arg = '. ' + '~/.bash_profile' + ';. ' + quote(activate_cmd) + '; '
-    shell_args = [shell_cmd, '-c']
-    if args is None:
-        args = [shell_cmd]
-    arg += ' '.join(quote(s) for s in args)
-    shell_args.append(arg)
-    return shell_args
+    pipcmd = Path(resolve_pip_or_create_venv())
+    shell_cmd = os.environ.get('SHELL', '/bin/bash')
+    shell_name = Path(shell_cmd).name
+    if shell_name == 'bash':
+        activate_cmd = str(pipcmd.with_name('activate'))
+    elif shell_name == 'fish':
+        activate_cmd = str(pipcmd.with_name('activate.fish'))
+    elif shell_name == 'csh':
+        activate_cmd = str(pipcmd.with_name('activate.csh'))
+    else:
+        raise ValueError('Shell doesn\'t appear to be supported by virtualenv: ' + shell_cmd)
+    if subproc_args is None:
+        subproc_args = [shell_cmd]
+
+    # construct an arg which sets up virtualenv to pass to -c for bash
+    arg = ''
+    bash_profile = path.abspath(path.expanduser('~/.bash_profile'))
+    if path.exists(bash_profile):
+        arg += '. ' + quote(bash_profile) + ';'
+    arg += '. ' + quote(activate_cmd) + ';'
+    arg += ' '.join(quote(s) for s in subproc_args)
+    return [shell_cmd, '-c', arg]
 
 
 def _run_in_virtualenv(args: t.Opt[t.Tuple[str]] = None):
     """Run the given args in a virtualenv-activated shell."""
-    args = _proc_args_for_venv(args)
+    args = _venv_proc_args(args)
     os.execv(args[0], args)
 
 
