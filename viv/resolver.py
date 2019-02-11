@@ -1,5 +1,5 @@
 import re
-from typing import Tuple, List, Dict, Optional as Opt, Union
+import viv.types as t
 from viv.parser import read_pipfile
 from os import path
 from email.parser import HeaderParser
@@ -11,7 +11,7 @@ def norm_package_name(s: str) -> str:
     return s.lower().replace('-', '_')
 
 
-def _resolve_pip_command() -> Opt[str]:
+def _resolve_pip_command() -> t.Opt[str]:
     """Find the pip command for the env. Prefer using resolve_pip_or_create_venv."""
     static_paths = [
         path.abspath('env/bin/pip'),
@@ -37,7 +37,7 @@ def resolve_pip_or_create_venv() -> str:
     return path.abspath('env/bin/pip')
 
 
-def decode_pip_show_output(s: str) -> List[Dict[str, str]]:
+def decode_pip_show_output(s: str) -> t.List[t.Dict[str, str]]:
     """Decode the output of pip show, which is a --- separated set
     of email-header encoded key-value pairs.
 
@@ -51,7 +51,7 @@ def decode_pip_show_output(s: str) -> List[Dict[str, str]]:
     return results
 
 
-def pip_show(*package: str) -> Dict[str, Dict[str, Union[str, List[str]]]]:
+def pip_show(*package: str) -> t.Dict[str, t.Dict[str, t.Union[str, t.List[str]]]]:
     """Create a mapping of package_name: <dependency data>, where dependency data is the output
     from pip-show.
     """
@@ -82,12 +82,12 @@ PACKAGE_WHITELIST = {
 }
 
 
-def get_installed_packages() -> List[Tuple[str, Opt[str]]]:
+def get_installed_packages() -> t.List[t.Tuple[str, t.Opt[str]]]:
     pipcmd = _resolve_pip_command()
     out, _ = sub.Popen([pipcmd, 'freeze'], stdout=sub.PIPE).communicate()
     result = []
     for l in out.decode('utf8').splitlines():
-        group: Tuple[str, Opt[str]]
+        group: t.Tuple[str, t.Opt[str]]
         if l.startswith('-e'):
             group = (l.split('#egg=')[1], None)
         else:
@@ -96,7 +96,7 @@ def get_installed_packages() -> List[Tuple[str, Opt[str]]]:
     return result
 
 
-def recurse_requirements(o: Dict, dependencies, package_list):
+def recurse_requirements(o: t.Dict, dependencies, package_list):
     """Populate dictionary o with all dependencies (including sub)
     from the package_list. Can be called recursively.
     """
@@ -113,7 +113,10 @@ def recurse_requirements(o: Dict, dependencies, package_list):
 
 def resolve_packages(pipfile_fpath: str):
     """Given a Pipfile, run within a fully installed env
-    in order to resolve all dependencies in the Pipfile."""
+    in order to resolve all dependencies in the Pipfile.
+
+    Return is a tuple of dicts, mapping normalized name to pip-show output.
+    """
     requirements = read_pipfile(pipfile_fpath)
     dependencies = pip_show(*tuple(norm_package_name(name)
                                    for name, ver in get_installed_packages()))

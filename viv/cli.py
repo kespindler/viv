@@ -1,10 +1,13 @@
 from shlex import quote
+import sys
 import os
-from typing import Tuple, Optional as Opt, Union, Dict
-from plette.models import Package
+import viv.types as t
 from pathlib import Path
-from viv.resolver import resolve_packages, read_pipfile, REQ_LINE_SPLITTER, \
-    resolve_pip_or_create_venv
+from viv.resolver import (
+    resolve_packages, read_pipfile, REQ_LINE_SPLITTER, resolve_pip_or_create_venv,
+    _resolve_pip_command,
+)
+from viv.parser import pip_args_from_pipfile_line, write_requirements_file
 import click
 import subprocess as sub
 
@@ -20,8 +23,9 @@ def fix_environ():
     Ultimately also led to a nasty path issue where flask server restarter would fail to use the
     venv.
     """
-    if '__PYVENV_LAUNCHER__' in os.environ:
-        del os.environ['__PYVENV_LAUNCHER__']
+    key = '__PYVENV_LAUNCHER__'
+    if key in os.environ:
+        del os.environ[key]
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
@@ -29,30 +33,7 @@ def cli():
     fix_environ()
 
 
-def pip_line_from_pipfile_line(pair: Tuple[str, Package]):
-    name, data = pair
-    data = data._data
-    if data == '*':
-        return [name]
-    elif isinstance(data, str):
-        return [name + data]
-    elif isinstance(data, dict):
-        if 'git' in data:
-            repo = data['git']
-            return ['-e', 'git+{repo}#egg={name}'.format(repo=repo, name=name)]
-        extras = ''
-        if 'extras' in data:
-            extras = '[' + ','.join(data['extras']) + ']'
-        return ['{name}{extras}{version}'.format(
-            name=name,
-            extras=extras,
-            version=data['version'],
-        )]
-    else:
-        raise ValueError('Could not understand Pipfile config line: ' + str(pair))
-
-
-def _install(packages: Tuple[str], dev, save):
+def _install(packages: t.Tuple[str], dev, save):
     """Installs a specified package, or the entire Pipfile if no package specified."""
     pipcmd = resolve_pip_or_create_venv()
     args = [pipcmd, 'install']
@@ -61,15 +42,17 @@ def _install(packages: Tuple[str], dev, save):
     else:
         pipfile = read_pipfile('Pipfile')
         for pair in pipfile.packages.items():
-            args.extend(pip_line_from_pipfile_line(pair))
+            args.extend(pip_args_from_pipfile_line(pair))
         if dev:
             for pair in pipfile.dev_packages.items():
-                args.extend(pip_line_from_pipfile_line(pair))
-    sub.Popen(args).wait()
+                args.extend(pip_args_from_pipfile_line(pair))
+    rc = sub.Popen(args).wait()
+    if rc:
+        return rc
     if save:
         if not packages:
             print('No packages were supplied to save.')
-            return
+            return 1
         pipfile = read_pipfile('Pipfile')
         package_list = pipfile.packages if dev else pipfile.dev_packages
 
@@ -78,19 +61,31 @@ def _install(packages: Tuple[str], dev, save):
             package_list[name] = ver or '*'
 
         pipfile.dump(open('Pipfile', 'w'))
+    return 0
 
 
 @cli.command()
-@click.option('--dev', help='Install for development.', is_flag=True)
-@click.option('--save', help='Save to Pipfile.', is_flag=True)
+@click.option('-d', '--dev', help='Install for development.', is_flag=True)
+@click.option('--default', help='Install for default.', is_flag=True)
+@click.option('-s', '--save', help='Save to Pipfile.', is_flag=True)
 @click.argument('packages', nargs=-1)
-def install(packages: Tuple[str], dev, save):
-    """Installs a specified package, or the entire Pipfile if no package specified."""
-    _install(packages, dev, save)
+def install(packages: t.Tuple[str], dev, default, save):
+    """Installs a specified package, or the entire Pipfile if no package specified.
+
+    viv install # installs from Pipfile, including dev
+    viv install --default # installs only the defaults
+    viv install -s package # Saves package to default section of Pipfile
+    viv install -sd package # Saves package to dev section of Pipfile
+    """
+    if packages and default:
+        raise ValueError('If you include packages, prod is the default.')
+    if not packages:
+        dev = not default
+    sys.exit(_install(packages, dev, save))
 
 
 @cli.command()
-@click.option('--no-install', default=False, help='Skip install step.', is_flag=True)
+@click.option('--no-install', help='Skip install step.', is_flag=True)
 def lock(no_install):
     """Generate the lockfile.
     """
@@ -99,23 +94,8 @@ def lock(no_install):
 
     default, dev = resolve_packages('Pipfile')
 
-    with open('requirements.txt', 'w') as f:
-        requirements = sorted(
-            '{name}=={version}'.format(name=d['Name'], version=d['Version'])
-            for d in default.values()
-        )
-        f.write('\n'.join(requirements))
-
-    with open('requirements-dev.txt', 'w') as f:
-        requirements = sorted(
-            '{name}=={version}'.format(name=d['Name'], version=d['Version'])
-            for d in dev.values()
-        )
-        f.write('\n'.join(requirements))
-
-
-def run_install(pipcmd, fpath):
-    sub.Popen([pipcmd, 'install', '--no-deps', '-r', fpath]).wait()
+    write_requirements_file(default, 'requirements.txt')
+    write_requirements_file(dev, 'requirements-dev.txt')
 
 
 @cli.command()
@@ -124,14 +104,18 @@ def sync(dev=False):
     """Install from the lock file.
     """
     pipcmd = resolve_pip_or_create_venv()
-    fpath = 'requirements.txt'
-    run_install(pipcmd, fpath)
+    args = [pipcmd, 'install', '--no-deps', '-r', 'requirements.txt']
     if dev:
-        fpath = 'requirements-dev.txt'
-        run_install(pipcmd, fpath)
+        args.extend(['-r', 'requirements-dev.txt'])
+    sys.exit(sub.Popen(args).wait())
 
 
-def venv_subproc(args: Opt[Tuple[str]]):
+def _proc_args_for_venv(args: t.Opt[t.Tuple[str]]):
+    """Generate shell args that run the given command
+    in a shell which has the virtualenv activated.
+
+    If no args are given, launch the shell itself.
+    """
     pipcmd = resolve_pip_or_create_venv()
     activate_cmd = str(Path(pipcmd).with_name('activate'))
     shell_cmd = '/bin/bash'
@@ -144,8 +128,9 @@ def venv_subproc(args: Opt[Tuple[str]]):
     return shell_args
 
 
-def _run_in_virtualenv(args: Opt[Tuple[str]] = None):
-    args = venv_subproc(args)
+def _run_in_virtualenv(args: t.Opt[t.Tuple[str]] = None):
+    """Run the given args in a virtualenv-activated shell."""
+    args = _proc_args_for_venv(args)
     os.execv(args[0], args)
 
 
@@ -158,17 +143,31 @@ def shell():
 
 @cli.command()
 @click.argument('args', nargs=-1)
-def run(args: Tuple[str]):
+def run(args: t.Tuple[str]):
     """Open a shell with the virtualenv activated.
     """
-    # print('\n'.join(k + '=' + 'v' for k, v in sorted(os.environ.items())))
     _run_in_virtualenv(args)
 
 
 @cli.command()
 @click.argument('packages', nargs=-1)
-def show(packages: Tuple[str]):
+def show(packages: t.Tuple[str]):
     """Open a shell with the virtualenv activated.
     """
-    # print('\n'.join(k + '=' + 'v' for k, v in sorted(os.environ.items())))
     _run_in_virtualenv(tuple(['pip', 'show'] + list(packages)))
+
+
+@cli.command()
+def env():
+    """Display the virtualenv path."""
+    pip_command = _resolve_pip_command()
+    if pip_command is None:
+        print('No virtualenv found.')
+        sys.exit(1)
+    print(Path(pip_command).parent.parent)
+
+
+@cli.command()
+def freeze():
+    """Freeze the pip environment."""
+    _run_in_virtualenv(('pip', 'freeze'))
