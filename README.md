@@ -16,13 +16,13 @@ You should be able to read the entire codebase in a few hours.
 
 ## Workflow
 
-`viv install` to install default and development packages from Pipfile.
+`viv install` to install default and development packages.
 
-`viv install --save <package>` to install a new package to Pipfile.
+`viv install --deploy` to install in production (no dev packages).
+
+`viv install <package>` to install a new package to Pipfile. Use `--dev` to save to dev section.
 
 `viv lock` to create requirements.txt and requirements-dev.txt files.
-
-`viv sync` to install from requirements.txt file.
 
 `viv shell` to open up a shell.
 

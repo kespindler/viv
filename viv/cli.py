@@ -35,9 +35,8 @@ def cli():
     fix_environ()
 
 
-def _install(packages: t.Tuple[str], dev, save):
+def _install(pipcmd, packages: t.Tuple[str], dev, save):
     """Installs a specified package, or the entire Pipfile if no package specified."""
-    pipcmd = resolve_pip_or_create_venv()
     args = [pipcmd, 'install']
     if packages:
         args.extend(packages)
@@ -67,23 +66,26 @@ def _install(packages: t.Tuple[str], dev, save):
 
 
 @cli.command()
-@click.option('-d', '--dev', help='Install for development.', is_flag=True)
-@click.option('--default', help='Install for default.', is_flag=True)
-@click.option('-s', '--save', help='Save to Pipfile.', is_flag=True)
+@click.option('-d', '--dev', help='Save for development.', is_flag=True)
+@click.option('--deploy', help='Install from requirements.', is_flag=True)
+@click.option('-n', '--no-save', help='Skip saving the requirement.', is_flag=True)
 @click.argument('packages', nargs=-1)
-def install(packages: t.Tuple[str], dev, default, save):
-    """Installs a specified package, or the entire Pipfile if no package specified.
+def install(packages: t.Tuple[str], dev, deploy, no_save):
+    """Installs frozen environment, or adds package to the environment.
 
-    viv install # installs from Pipfile, including dev
-    viv install --default # installs only the defaults
-    viv install -s package # Saves package to default section of Pipfile
-    viv install -sd package # Saves package to dev section of Pipfile
+    viv install # installs from reqs, including dev
+    viv install --deploy # installs from reqs, only deploy
+    viv install package # Install package to the environment, saving it
+    viv install -d package # Saves package to dev section of Pipfile
     """
-    if packages and default:
-        raise ValueError('If you include packages, prod is the default.')
+    pipcmd = resolve_pip_or_create_venv()
     if not packages:
-        dev = not default
-    sys.exit(_install(packages, dev, save))
+        args = [pipcmd, 'install', '--no-deps', '-r', 'requirements.txt']
+        if not deploy:
+            args.extend(['-r', 'requirements-dev.txt'])
+        sys.exit(sub.Popen(args).wait())
+    else:
+        sys.exit(_install(pipcmd, packages, dev, not no_save))
 
 
 @cli.command()
@@ -91,8 +93,9 @@ def install(packages: t.Tuple[str], dev, default, save):
 def lock(no_install):
     """Generate the lockfile.
     """
+    pipcmd = resolve_pip_or_create_venv()
     if not no_install:
-        _install(tuple(), True, False)
+        _install(pipcmd, tuple(), True, False)
 
     default, dev = resolve_packages('Pipfile')
 
