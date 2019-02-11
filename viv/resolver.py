@@ -28,7 +28,7 @@ def _resolve_pip_command() -> t.Opt[str]:
             return p
     out, err = sub.Popen(['pipenv', '--venv'], stdout=sub.PIPE, stderr=sub.PIPE).communicate()
     if out:
-        return out + '/bin/pip'
+        return out.decode('utf8').strip() + '/bin/pip'
     return None
 
 
@@ -38,7 +38,7 @@ def resolve_pip_or_create_venv() -> str:
     if cmd:
         return cmd
     try:
-        code = sub.Popen(['virtualenv', 'env']).wait()
+        code = sub.Popen(['virtualenv', 'env', '--python', 'python3']).wait()
         if code:
             raise OSError('Failed to create virtualenv.')
     except KeyboardInterrupt:

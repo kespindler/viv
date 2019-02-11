@@ -1,5 +1,6 @@
 from shlex import quote
 import sys
+import shutil
 import os
 from os import path
 import viv.types as t
@@ -111,21 +112,21 @@ def sync(dev=False):
     sys.exit(sub.Popen(args).wait())
 
 
-def _venv_proc_args(subproc_args: t.Opt[t.Tuple[str]]):
+def _venv_proc_args(pipcmd: str, subproc_args: t.Opt[t.Tuple[str]]):
     """Generate shell args that run the given command
     in a shell which has the virtualenv activated.
 
     If no args are given, launch the shell itself.
     """
-    pipcmd = Path(resolve_pip_or_create_venv())
+    pip_cmd = Path(pipcmd)
     shell_cmd = os.environ.get('SHELL', '/bin/bash')
     shell_name = Path(shell_cmd).name
     if shell_name == 'bash':
-        activate_cmd = str(pipcmd.with_name('activate'))
+        activate_cmd = str(pip_cmd.with_name('activate'))
     elif shell_name == 'fish':
-        activate_cmd = str(pipcmd.with_name('activate.fish'))
+        activate_cmd = str(pip_cmd.with_name('activate.fish'))
     elif shell_name == 'csh':
-        activate_cmd = str(pipcmd.with_name('activate.csh'))
+        activate_cmd = str(pip_cmd.with_name('activate.csh'))
     else:
         raise ValueError('Shell doesn\'t appear to be supported by virtualenv: ' + shell_cmd)
     if subproc_args is None:
@@ -135,15 +136,17 @@ def _venv_proc_args(subproc_args: t.Opt[t.Tuple[str]]):
     arg = ''
     bash_profile = path.abspath(path.expanduser('~/.bash_profile'))
     if path.exists(bash_profile):
-        arg += '. ' + quote(bash_profile) + ';'
-    arg += '. ' + quote(activate_cmd) + ';'
+        arg += '. ' + quote(bash_profile) + '; '
+    arg += '. ' + quote(activate_cmd) + '; '
     arg += ' '.join(quote(s) for s in subproc_args)
-    return [shell_cmd, '-c', arg]
+    result = [shell_cmd, '-c', arg]
+    return result
 
 
 def _run_in_virtualenv(args: t.Opt[t.Tuple[str]] = None):
     """Run the given args in a virtualenv-activated shell."""
-    args = _venv_proc_args(args)
+    pipcmd = Path(resolve_pip_or_create_venv())
+    args = _venv_proc_args(pipcmd, args)
     os.execv(args[0], args)
 
 
@@ -182,5 +185,16 @@ def env():
 
 @cli.command()
 def freeze():
-    """Freeze the pip environment."""
+    """Freeze the packages in the env, just like pip freeze."""
     _run_in_virtualenv(('pip', 'freeze'))
+
+
+@cli.command()
+def destroy():
+    """Destroy the pip environment."""
+    pipcmd = _resolve_pip_command()
+    if pipcmd is None:
+        return
+    out, _ = sub.Popen(_venv_proc_args(pipcmd, ['/bin/bash', '-c', 'echo $VIRTUAL_ENV']),
+                       stdout=sub.PIPE).communicate()
+    shutil.rmtree(out.decode('utf8').strip())
