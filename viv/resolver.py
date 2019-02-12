@@ -61,7 +61,7 @@ def decode_pip_show_output(s: str) -> t.List[t.Dict[str, str]]:
     return results
 
 
-def pip_show(*package: str) -> t.Dict[str, t.Dict[str, t.Union[str, t.List[str]]]]:
+def pip_show(*package: str) -> t.List[t.Dict[str, t.Union[str, t.List[str]]]]:
     """Create a mapping of package_name: <dependency data>, where dependency data is the output
     from pip-show.
     """
@@ -75,13 +75,7 @@ def pip_show(*package: str) -> t.Dict[str, t.Dict[str, t.Union[str, t.List[str]]
         out['Requires'] = req.split(', ') if req else []
         req = out.get('Required-By')
         out['Required-By'] = req.split(', ') if req else []
-    result = {}
-    for pkg_name, output in zip(package, pip_show_output):
-        output_name = norm_package_name(output['Name'])
-        if pkg_name != output_name:
-            raise ValueError('No pip show output found for ' + pkg_name)
-        result[pkg_name] = output
-    return result
+    return pip_show_output
 
 
 REQ_LINE_SPLITTER = re.compile(r'^([A-Za-z0-9-_.]+)([*=>~^]{1,2}[a-zA-z0-9\.]+)?$')
@@ -92,17 +86,21 @@ PACKAGE_WHITELIST = {
 }
 
 
-def get_installed_packages() -> t.List[t.Tuple[str, t.Opt[str]]]:
+def get_installed_packages() -> t.List[t.Dict[str, str]]:
     pipcmd = _resolve_pip_command()
     out, _ = sub.Popen([pipcmd, 'freeze'], stdout=sub.PIPE).communicate()
     result = []
-    for l in out.decode('utf8').splitlines():
-        group: t.Tuple[str, t.Opt[str]]
-        if l.startswith('-e'):
-            group = (l.split('#egg=')[1], None)
+    for install_line in out.decode('utf8').splitlines():
+        if install_line.startswith('-e'):
+            name = install_line.split('#egg=')[1]
+            version = None
         else:
-            group = tuple(REQ_LINE_SPLITTER.match(l).groups())
-        result.append(group)
+            name, version = tuple(REQ_LINE_SPLITTER.match(install_line).groups())
+        result.append(dict(
+            Name=name,
+            Version=version,
+            Install=install_line,
+        ))
     return result
 
 
@@ -128,8 +126,12 @@ def resolve_packages(pipfile_fpath: str):
     Return is a tuple of dicts, mapping normalized name to pip-show output.
     """
     requirements = read_pipfile(pipfile_fpath)
-    dependencies = pip_show(*tuple(norm_package_name(name)
-                                   for name, ver in get_installed_packages()))
+    installed = get_installed_packages()
+    show_output = pip_show(*tuple(norm_package_name(d['Name']) for d in installed))
+    for install, dep in zip(installed, show_output):
+        dep['Install'] = install['Install']
+
+    dependencies = {norm_package_name(d['Name']): d for d in show_output}
 
     full_requirements = {}
     recurse_requirements(full_requirements, dependencies, requirements['packages'].keys())

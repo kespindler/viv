@@ -41,12 +41,14 @@ def pip_args_from_pipfile_line(pair: t.Tuple[str, Package]) -> t.List[str]:
         raise ValueError('Could not understand Pipfile config line: ' + str(pair))
 
 
+def req_line(d: t.Dict[str, str]) -> str:
+    if 'Install' in d:
+        return d['Install']
+    else:
+        return '{name}=={version}'.format(name=d['Name'], version=d['Version'])
+
+
 def write_requirements_file(packages, fpath: str):
     with open(fpath, 'w') as f:
-        requirements = sorted(
-            '{name}=={version}'.format(name=d['Name'], version=d['Version'])
-            for d in packages.values()
-        )
+        requirements = sorted(req_line(d) for d in packages.values())
         f.write('\n'.join(requirements))
-
-
