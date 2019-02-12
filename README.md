@@ -1,22 +1,22 @@
 # Viv
 
-Viv, an easier python packaging tool.
+Viv, an easier python packaging tool. Aims to more or less seamlessly interop with `pipenv`.
 
 Alpha quality software.
 
-## Why Build It
+## Install
 
-Pipenv is really, really, really slow.
+    /usr/local/bin/pip3 -q install -e "git+git@github.com:kespindler/viv.git#egg=viv"
 
-## How viv works
+## Getting Started
 
-Viv is a relatively thin wrapper around pip, providing tools for managing a Pipfile and requirements\*.txt files.
+1. `viv lock` to create requirements.txt and requirements-dev.txt files from your Pipfile. 
 
-You should be able to read the entire codebase in a few hours.
+## Basic Commands
 
-## Workflow
+`viv env` to see which virtualenv viv is pointing to.
 
-`viv install` to install default and development packages.
+`viv install` to install default and development packages from req\*.txt
 
 `viv install --deploy` to install in production (no dev packages).
 
@@ -28,6 +28,16 @@ You should be able to read the entire codebase in a few hours.
 
 `viv run <bash command>` to run a program. 
     Use `viv run -- <bash command>` if there are conflicting command line arguemnts.
+
+## Why Build It
+
+Pipenv is really, really, really slow. It also hangs and has other nastiness.
+
+## How viv works
+
+Viv is a relatively thin wrapper around pip, providing tools for managing a Pipfile and requirements\*.txt files.
+
+You should be able to read the entire codebase in a few hours.
 
 ## Outstanding issues
 
